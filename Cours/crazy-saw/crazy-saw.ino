@@ -40,7 +40,7 @@ void setup() {
 }
 
 void loop() {
-  myDsp.setFreq(20);
+  myDsp.setFreq(0);
   delay(100);
   waitButton();
 }
