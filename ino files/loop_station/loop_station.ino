@@ -18,15 +18,11 @@ AudioPlayMemory    sound2;  // all six sounds simultaneously
 AudioPlayMemory    sound3;
 AudioPlayMemory    sound4;
 AudioPlayMemory    sound5;
- 
-AudioPlaySdRaw playRaw1; 
 
-// which input on the audio shield will be used?
-//const int myInput = AUDIO_INPUT_LINEIN;
-const int myInput = AUDIO_INPUT_MIC;
+AudioPlaySdWav playWav;
 
 AudioMixer4 mix1;
-AudioMixer4 mix2;
+AudioMixer4 finalMix;
 
 AudioRecordQueue queue1;
 AudioOutputI2S audioOutput;
@@ -35,13 +31,13 @@ AudioConnection c1(sound0, 0, mix1, 0);
 AudioConnection c2(sound1, 0, mix1, 1);
 AudioConnection c3(sound2, 0, mix1, 2);
 AudioConnection c4(sound3, 0, mix1, 3);
-AudioConnection c5(mix1, 0, mix2, 0); 
-AudioConnection c6(sound4, 0, mix2, 1);
-AudioConnection c7(sound5, 0, mix2, 2);
-AudioConnection c8(playRaw1, 0, mix2, 3);
+AudioConnection c5(mix1, 0, finalMix, 0); 
+AudioConnection c6(sound4, 0, finalMix, 1);
+AudioConnection c7(sound5, 0, finalMix, 2);
+AudioConnection c8(playWav, 0, finalMix, 3);
 
-AudioConnection patchCord5(mix2, 0, audioOutput, 0);
-AudioConnection patchCord6(mix2, 0, audioOutput, 1);
+AudioConnection patchCord0(finalMix, 0, audioOutput, 0);
+AudioConnection patchCord1(finalMix, 0, audioOutput, 1);
 AudioControlSGTL5000 sgtl5000_1;
 
 Adafruit_Trellis matrix0 = Adafruit_Trellis();
@@ -62,12 +58,23 @@ const int ledInterval = 200;
 unsigned long currentMillis = 0;
 unsigned long previousLedMillis[numKeys];
 
-uint8_t preset;
-uint8_t ledPreset;
+unsigned long startReplayTime;
+
+uint8_t preset=1;
 bool rec=false;
 
-// The file where data is recorded
-File frec;
+// (i,j) = (button, timming)
+// le premier element du tableu indique si il y a ou pas un enregistrement
+// l'enregistrement finit avec une touche fictive -1
+#define TOUCH 0
+#define TIME 1
+#define loopSize 100
+
+long int recMem[2][2][loopSize];
+uint8_t swap=0;
+uint8_t antiSwap=1;
+uint8_t recIndex=1;
+uint8_t replayIndex=0;
 
 void setup() {
   Serial.begin(9600);
@@ -75,15 +82,16 @@ void setup() {
 
   AudioMemory(60);
   sgtl5000_1.enable();
-  sgtl5000_1.inputSelect(myInput);
   sgtl5000_1.volume(0.7);
 
   mix1.gain(0, 0.4);
   mix1.gain(1, 0.4);
   mix1.gain(2, 0.4);
   mix1.gain(3, 0.4);
-  mix2.gain(1, 0.4);
-  mix2.gain(2, 0.4);
+  finalMix.gain(0, 0.4);
+  finalMix.gain(1, 0.4);
+  finalMix.gain(2, 0.4);
+  finalMix.gain(3, 0.4);
 
   // INT pin requires a pullup
   pinMode(INTPIN, INPUT);
@@ -102,7 +110,8 @@ void setup() {
     }
   }
 
-  setPreset(7); // 7 set preset 1
+  // rec params
+  recMem[swap][TOUCH][0]=-1;
   trellisLedFrontAnimation();
 }
 
@@ -128,7 +137,7 @@ void trellisLedFrontAnimation(){
   // light up all the LEDs in order
   for (uint8_t i=0; i<numKeys; i++) {
     if((i+1)%4==0) continue;
-    trellis.setLED(i);
+    trellis.clrLED(i);
     if((i+2)%4==0) {
      trellis.writeDisplay();
      delay(45);
@@ -138,7 +147,7 @@ void trellisLedFrontAnimation(){
   // then turn them off
   for (uint8_t i=0; i<numKeys; i++) {
     if((i+1)%4==0) continue;
-    trellis.clrLED(i);
+    trellis.setLED(i);
     if((i+2)%4==0) {
      trellis.writeDisplay();
      delay(45);
@@ -150,13 +159,13 @@ void trellisLedBlinkAnimation(){
   for(int8_t k=0;k<4;k++) {
     for (int8_t i=numKeys-1; i>=0; i--) {
       if((i+1)%4==0) continue;
-      trellis.setLED(i);    
+      trellis.clrLED(i);    
     }
     trellis.writeDisplay();
     delay(80);
     for (int8_t i=numKeys-1; i>=0; i--) {
       if((i+1)%4==0) continue;
-      trellis.clrLED(i);    
+      trellis.setLED(i);    
     }
     trellis.writeDisplay();
     delay(75);
@@ -167,7 +176,7 @@ void trellisLedBackAnimation(){
   // light up all the LEDs in order
   for (int8_t i=numKeys-1; i>=0; i--) {
     if((i+1)%4==0) continue;
-    trellis.setLED(i);
+    trellis.clrLED(i);
     if(i%4==0) {
      trellis.writeDisplay();
      delay(45);
@@ -177,7 +186,7 @@ void trellisLedBackAnimation(){
   // then turn them off
   for (int8_t i=numKeys-1; i>=0; i--) {
     if((i+1)%4==0) continue;
-    trellis.clrLED(i);
+    trellis.setLED(i);
     if(i%4==0) {
      trellis.writeDisplay();
      delay(45);
@@ -188,19 +197,19 @@ void trellisLedBackAnimation(){
 void dropAnimation(uint8_t i){
   if((i+1)%4 == 0) return;
   if((i+2)%4 != 0) {
-    trellis.setLED(i+1); 
+    trellis.clrLED(i+1); 
     previousLedMillis[i+1]=currentMillis+(ledInterval/6);
   }
   if(i%4 != 0) {
-    trellis.setLED(i-1);
+    trellis.clrLED(i-1);
     previousLedMillis[i-1]=currentMillis+(ledInterval/6);
   }  
   if(i>3) {
-    trellis.setLED(i-4); 
+    trellis.clrLED(i-4); 
     previousLedMillis[i-4]=currentMillis+(ledInterval/6);
   } 
   if(i<12) {
-    trellis.setLED(i+4); 
+    trellis.clrLED(i+4); 
     previousLedMillis[i+4]=currentMillis+(ledInterval/6);
   }
   trellis.writeDisplay(); 
@@ -227,9 +236,9 @@ void updateLeds(){
   }
   
   for (uint8_t i=0; i<numKeys; i++) {
-    if(i == LEDREC || i == ledPreset) continue;
-    if (trellis.isLED(i) && (currentMillis - previousLedMillis[i] >= ledInterval)){
-      trellis.clrLED(i);
+    if((i+1)%4==0) continue;
+    if (!trellis.isLED(i) && (currentMillis - previousLedMillis[i] >= ledInterval)){
+      trellis.setLED(i);
       trellis.writeDisplay();
     }
   }
@@ -240,6 +249,8 @@ void loop() {
   
   currentMillis = millis();
   updateLeds();
+  
+  if(anythingRecorded()) playRec();
 
   if (trellis.readSwitches()) {
     for (uint8_t i=0; i<numKeys; i++) {
@@ -247,159 +258,195 @@ void loop() {
         playSketchAndAnimate(i);
     }
   }
-
-  if(rec) continueRecording();
 }
 
 void switchRecord() {
   if(rec) stopRecording();
-  else startRecording();
-}
-
-void setPreset(uint8_t i) {
-  if(ledPreset != i) {
-    trellis.clrLED(ledPreset);
-    ledPreset = i;
-    preset = (i-3)/4;
-    trellis.setLED(i);
-    trellis.writeDisplay();
+  else {
+    recMem[swap][TIME][0]=currentMillis;
+    rec=true;
   }
 }
 
-void playSketchAndAnimate(uint8_t i) {
-  trellis.setLED(i);
-  trellis.writeDisplay();
+void switchPreset() {
+  preset=((preset+1)%3)+1;
+  
+  switch(preset){
+    case 1:
+      trellis.setLED(7);
+      trellis.clrLED(11);
+      trellis.clrLED(15);
+      trellis.writeDisplay();
+      trellisLedFrontAnimation();
+      break;
+    case 2:
+      trellis.clrLED(7);
+      trellis.setLED(11);
+      trellis.setLED(15);
+      trellis.writeDisplay();
+      trellisLedBlinkAnimation();
+      break;
+    case 3:
+      trellis.clrLED(7);
+      trellis.clrLED(11);
+      trellis.setLED(15);
+      trellis.writeDisplay();
+      trellisLedBackAnimation();
+      break;
+    default:
+      Serial.println("Unexpected behaviour");
+      break;
+  }
+}
 
-  dropAnimation(i);
+void clearLoopMemory() {
+  recMem[0][TOUCH][0] = -1; 
+  recMem[1][TOUCH][0] = -1;
+}
+
+void playSketchAndAnimate(uint8_t i) {
+  trellis.clrLED(i);
+  trellis.writeDisplay();
+  
+  if(rec) record(i);
   
   switch(i){
     case 0:
-      Serial.print("Memory: ");
-      Serial.println(AudioMemoryUsage());
-      trellisLedFrontAnimation();
+      if(preset == 1) playWav.play("LIB/PRESET2/SYNTH2.WAV");
+      else if(preset == 2) playWav.play("LIB/PRESET1/SALSA.WAV");
+      else playWav.play("LIB/PRESET3/GUN1.WAV");
+      dropAnimation(i);
       break;
     case 1:
+      if(preset == 1) playWav.play("LIB/PRESET2/RYTHM.WAV");
+      else if(preset == 2) playWav.play("LIB/PRESET1/WAO.WAV");
+      else playWav.play("LIB/PRESET3/MELO.WAV");
       break;
     case 2:
+      if(preset == 1) playWav.play("LIB/PRESET2/SYNTH1.WAV");
+      else if(preset == 2) playWav.play("LIB/PRESET1/FUNK.WAV");
+      else playWav.play("LIB/PRESET3/GUN2.WAV");
+      dropAnimation(i);
       break;
     case 3:
       switchRecord();
       break;
     case 4:
+      if(preset == 1) playWav.play("LIB/PRESET3/PIANO1.WAV");
+      else if(preset == 2) playWav.play("LIB/PRESET1/BASS.WAV");
+      else playWav.play("LIB/PRESET3/PIANO1.WAV");
       break;
     case 5:
+      if(preset == 1) playWav.play("LIB/PRESET2/SYNTH3.WAV");
+      else if(preset == 2) playWav.play("LIB/PRESET1/WAO.WAV");
+      else playWav.play("LIB/PRESET3/FUNK.WAV");
       break;
     case 6:
+      if(preset == 1) playWav.play("LIB/PRESET3/PIANO2.WAV");
+      else if(preset == 2) playWav.play("LIB/PRESET1/BASS.WAV");
+      else playWav.play("LIB/PRESET3/PIANO2.WAV");
       break;
     case 7:
-      setPreset(i);
+      clearLoopMemory();
       trellisLedFrontAnimation();
+      trellisLedFrontAnimation();
+      trellisLedBlinkAnimation();
       break;
     case 8:
       if(preset == 1) sound0.play(Crash1);
       else if(preset == 2) sound0.play(Crash2);
-      else if(preset == 3) sound0.play(Shaker3);
+      else sound0.play(Shaker3);
       break;
     case 9:
       if(preset == 1) sound1.play(Cowbell1);
       else if(preset == 2) sound1.play(Tom2);
-      else if(preset == 3) sound1.play(Tom3);
+      else sound1.play(Tom3);
       break;
     case 10:
       if(preset == 1) sound2.play(Snare1);
       else if(preset == 2) sound2.play(Snare2);
-      else if(preset == 3) sound2.play(Snare3);
+      else sound2.play(Snare3);
       break;
     case 11:
-      setPreset(i);
-      trellisLedBlinkAnimation();
+      //setPreset(i);
+      //Serial.println(i);
+      //trellisLedBlinkAnimation();
       break;
     case 12:
+      //dropAnimation(i);
       if(preset == 1) sound3.play(Kick1);
       else if(preset == 2) sound3.play(Kick2);
-      else if(preset == 3) sound3.play(Kick3);
+      else sound3.play(Kick3);
       break;
     case 13:
       if(preset == 1) sound4.play(Clap1);
       else if(preset == 2) sound4.play(Openhat2);
-      else if(preset == 3) sound4.play(Openhat3);
+      else sound4.play(Openhat3);
       break;
     case 14:
+      //dropAnimation(i);
       if(preset == 1) sound5.play(Hihat1);
       else if(preset == 2) sound5.play(Hihat2);
-      else if(preset == 3) sound5.play(Hihat3);
+      else sound5.play(Hihat3);
       break;
     case 15:
-      setPreset(i);
-      trellisLedBackAnimation();
+      switchPreset();
+      //trellisLedBackAnimation();
       break;
     default:
-      Serial.print("Unexpected default in playSketchAndAnimate's switch case"); 
+      Serial.println("Unexpected default in playSketchAndAnimate's switch case"); 
       break;
   }
 
   previousLedMillis[i]=currentMillis;
 }
 
-void startRecording() {
-  Serial.println("startRecording");
-  if (SD.exists("REC/RECORD.RAW")) {
-    // The SD library writes new data to the end of the
-    // file, so to start a new recording, the old file
-    // must be deleted before new data is written.
-    SD.remove("RECORD.RAW");
-  }
-  frec = SD.open("REC/RECORD.RAW", FILE_WRITE);
-  if (frec) {
-    queue1.begin();
-    rec = true;
-  }
-}
+bool anythingRecorded() { return recMem[0][TOUCH][0] == -2 || recMem[1][TOUCH][0] == -2; }
 
-void continueRecording() {
-  if (queue1.available() >= 2) {
-    byte buffer[512];
-    // Fetch 2 blocks from the audio library and copy
-    // into a 512 byte buffer.  The Arduino SD library
-    // is most efficient when full 512 byte sector size
-    // writes are used.
-    memcpy(buffer, queue1.readBuffer(), 256);
-    queue1.freeBuffer();
-    memcpy(buffer+256, queue1.readBuffer(), 256);
-    queue1.freeBuffer();
-    // write all 512 bytes to the SD card
-    //elapsedMicros usec = 0;
-    frec.write(buffer, 512);
-    // Uncomment these lines to see how long SD writes
-    // are taking.  A pair of audio blocks arrives every
-    // 5802 microseconds, so hopefully most of the writes
-    // take well under 5802 us.  Some will take more, as
-    // the SD library also must write to the FAT tables
-    // and the SD card controller manages media erase and
-    // wear leveling.  The queue1 object can buffer
-    // approximately 301700 us of audio, to allow time
-    // for occasional high SD card latency, as long as
-    // the average write time is under 5802 us.
-    //Serial.print("SD write, us=");
-    //Serial.println(usec);
-  }
+void swapSwap() {
+  antiSwap=swap;
+  if(swap == 1) swap=0;
+  else swap=1;
 }
 
 void stopRecording() {
-  Serial.println("stopRecording");
-  queue1.end();
-  if (rec) {
-    while (queue1.available() > 0) {
-      frec.write((byte*)queue1.readBuffer(), 256);
-      queue1.freeBuffer();
+  if(anythingRecorded()) {
+    uint8_t k=0;
+    while(recMem[antiSwap][TOUCH][k] != LEDREC && k<loopSize) {
+      if(k>=recIndex) {
+        recMem[swap][TOUCH][k] = recMem[antiSwap][TOUCH][k];
+        recMem[swap][TIME][k] = recMem[antiSwap][TIME][k];
+      }
+      k++;
     }
-    frec.close();
   }
+  recIndex = 1;
+  recMem[swap][TOUCH][0]=-2;
+  swapSwap();
+  recMem[swap][TOUCH][0]=-1;
+  replayIndex=0;
   rec=false;
-  startPlaying();
 }
 
-void startPlaying() {
-  Serial.println("startPlaying");
-  playRaw1.play("REC/RECORD.RAW");
+void record(uint8_t i) {
+  if(recIndex >= 0) {
+    recMem[swap][TOUCH][recIndex]=i;
+    recMem[swap][TIME][recIndex]=currentMillis;
+  } else Serial.println("Unexpected record with recIndex = 0"); 
+  recIndex++;
+
+  if(recIndex >= loopSize)
+    stopRecording();
+}
+
+void playRec() {
+  if(replayIndex == 0) {
+    startReplayTime = currentMillis;
+    replayIndex++;
+  }
+
+  if((currentMillis - startReplayTime) >= (recMem[antiSwap][TIME][replayIndex]-recMem[antiSwap][TIME][0])) {
+    if(recMem[antiSwap][TOUCH][replayIndex] != LEDREC) playSketchAndAnimate(recMem[antiSwap][TOUCH][replayIndex]);
+    replayIndex= recMem[antiSwap][TOUCH][replayIndex] == LEDREC ? 0 : (replayIndex+1)%loopSize;
+  }
 }
