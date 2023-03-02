@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include "preset3.h"
+#include "Preset3.h"
 
 PROGMEM const unsigned int Hihat3[449] = {
 0x010006E4,0x80800000,0x4E62D512,0x5B3DDFE0,0x37DBD25A,0xCDD5A75A,0xE1456054,0x6A4DCED6,

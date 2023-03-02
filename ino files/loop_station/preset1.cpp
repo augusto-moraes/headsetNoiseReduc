@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include "preset1.h"
+#include "Preset1.h"
 
 PROGMEM const unsigned int Hihat1[897] = {
 0x01000DC8,0x00000000,0x40000000,0x495ACBCB,0x51E6DC28,0xE0E0D777,0xF17B6BEE,0xD0F06AEB,

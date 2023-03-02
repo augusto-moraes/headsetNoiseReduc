@@ -1,7 +1,7 @@
 // Audio data converted from WAV file by wav2sketch
 
 #include <Arduino.h>
-#include "preset2.h"
+#include "Preset2.h"
 
 // Converted from hihat2.wav, using 44100 Hz, u-law encoding
 PROGMEM const unsigned int Hihat2[1345] = {
