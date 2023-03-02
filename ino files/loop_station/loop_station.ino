@@ -9,8 +9,8 @@
 #include "Preset2.h"
 #include "Preset3.h"
 
-#define LEDREC 3
-#define RECBLINK 600
+#define LEDREC 3 // pad key to start/stop recording
+#define RECBLINK 600 // blinking rate of the recording LED
 
 AudioPlayMemory    sound0;
 AudioPlayMemory    sound1;  // six memory players, so we can play
@@ -42,36 +42,36 @@ AudioControlSGTL5000 sgtl5000_1;
 Adafruit_Trellis matrix0 = Adafruit_Trellis();
 Adafruit_TrellisSet trellis =  Adafruit_TrellisSet(&matrix0);
 
-#define numKeys 16
+#define numKeys 16 // number of keys in the trellis drumpad
 
-// [Trellis] INT wire to pin #A2 (SCL to SCL and SDA to SDA is default)
-#define INTPIN A2
+#define INTPIN A2 // [Trellis] INT wire to pin #A2 (SCL to SCL and SDA to SDA is default)
 
 // [Teensy Audio Shield]
 #define SDCARD_CS_PIN    10
 #define SDCARD_MOSI_PIN  7
 #define SDCARD_SCK_PIN   14
 
-const int ledInterval = 200;
+const int ledInterval = 200; // blinking time when I touch a button
 
 unsigned long currentMillis = 0;
-unsigned long previousLedMillis[numKeys];
-unsigned long startReplayTime;
-uint8_t preset=1;
-bool rec=false;
+unsigned long previousLedMillis[numKeys]; // memorises when I touched a button for the last time (used to waiting to turning the LED on again)
+unsigned long startReplayTime; // marks the begining of my replay track
+
+uint8_t preset=1; // current preset 
+bool rec=false; // recording state flag
 
 // (i,j) = (button, timming)
 // le premier element du tableu indique si il y a ou pas un enregistrement
-// l'enregistrement finit avec une touche fictive -1
-#define TOUCH 0
-#define TIME 1
-#define loopSize 100
+// l'enregistrement finit avec une touche fictive 3 (LEDREC)
+#define TOUCH 0 // stands for the touched button coordinates
+#define TIME 1 // stands for when the button was touched
+#define loopSize 100 // maximum size of a track (nb of buttons)
 
-long int recMem[2][2][loopSize];
-uint8_t swap=0;
+long int recMem[2][2][loopSize]; // recMem is the recording memory. It memorises the played notes and the timing in the record() function
+uint8_t swap=0; // swap (and antiSwap) allows to record while replaying a saved track. Once the recording is done, the swap track becomes the new main track
 uint8_t antiSwap=1;
-uint8_t recIndex=1;
-uint8_t replayIndex=0;
+uint8_t recIndex=1; // recording index (recIndex++ each time I add a new key)
+uint8_t replayIndex=0; // replay index (same, but for replaying)
 
 void setup() {
   Serial.begin(9600);
@@ -90,12 +90,11 @@ void setup() {
   finalMix.gain(2, 0.4);
   finalMix.gain(3, 0.4);
 
-  // INT pin requires a pullup
   pinMode(INTPIN, INPUT);
   digitalWrite(INTPIN, HIGH);
   trellis.begin(0x70);
 
-  // SD card
+  // SD card slot check
   SPI.setMOSI(SDCARD_MOSI_PIN);
   SPI.setSCK(SDCARD_SCK_PIN);
   if (!(SD.begin(SDCARD_CS_PIN))) {
@@ -128,9 +127,10 @@ void loop() {
 }
 
 // ######################################## //
-// ########## Other Functions ############# //
+// ########## Main Functions ############## //
 // ######################################## //
 
+// checks LED blinking timing (based on Arduino Several Things at the Same Time) 
 void updateLeds() {
   if(rec) recAnimation();
   else if(trellis.isLED(LEDREC)) {
@@ -147,8 +147,7 @@ void updateLeds() {
   }
 }
 
-bool anythingRecorded() { return recMem[0][TOUCH][0] == -2 || recMem[1][TOUCH][0] == -2; }
-
+// play track in the record array (recMem) in loop (finishes at the end of the array OR when the record button is pressed)
 void playRec() {
   if(replayIndex == 0) {
     startReplayTime = currentMillis;
@@ -162,6 +161,8 @@ void playRec() {
   }
 }
 
+// manages what each button does (samples played, changes preset, record, etc)
+// and adds some delay (blinking) to the button that has been pressed
 void playSketchAndAnimate(uint8_t i) {
   trellis.clrLED(i);
   trellis.writeDisplay();
@@ -254,14 +255,7 @@ void playSketchAndAnimate(uint8_t i) {
   previousLedMillis[i]=currentMillis;
 }
 
-void switchRecord() {
-  if(rec) stopRecording();
-  else {
-    recMem[swap][TIME][0]=currentMillis;
-    rec=true;
-  }
-}
-
+// changes samples profile (1, 2 or 3) and animates it
 void switchPreset() {
   preset=((preset+1)%3)+1;
   
@@ -293,28 +287,34 @@ void switchPreset() {
   }
 }
 
-void clearLoopMemory() {
-  recMem[0][TOUCH][0] = -1; 
-  recMem[1][TOUCH][0] = -1;
-}
+// ##################################
+// ###### playing and recording #####
+// ##################################
 
-void swapSwap() {
-  antiSwap=swap;
-  if(swap == 1) swap=0;
-  else swap=1;
-}
+// first element of any of the tracks in recMem equals -2 means there is a valid record to be played
+bool anythingRecorded() { return recMem[0][TOUCH][0] == -2 || recMem[1][TOUCH][0] == -2; }
 
+// if there is anything recorded in one track, it records in the other one (thus we can replay and record at the same time)
 void record(uint8_t i) {
-  if (recIndex >= 0) {
+  if (recIndex >= 0 && i!=7) {
     recMem[swap][TOUCH][recIndex]=i;
     recMem[swap][TIME][recIndex]=currentMillis;
   } else Serial.println("Unexpected record with recIndex = 0"); 
   recIndex++;
 
-  if(recIndex >= loopSize)
+  if(recIndex >= loopSize || i==7)
     stopRecording();
 }
 
+void switchRecord() {
+  if(rec) stopRecording();
+  else {
+    recMem[swap][TIME][0]=currentMillis;
+    rec=true;
+  }
+}
+
+// once the rec is over, we swapSwap() in order to replay the new track (and the old one is now avaliable to recording as antiSwap)
 void stopRecording() {
   if(anythingRecorded()) {
     uint8_t k=0;
@@ -332,6 +332,19 @@ void stopRecording() {
   recMem[swap][TOUCH][0]=-1;
   replayIndex=0;
   rec=false;
+}
+
+// clear the loop = set the flag (first elem of recMem) to -1. if it's not equals -2, it means there is "nothing recorded"
+void clearLoopMemory() {
+  recMem[0][TOUCH][0] = -1; 
+  recMem[1][TOUCH][0] = -1;
+}
+
+// could have used swap = !swap?
+void swapSwap() {
+  antiSwap=swap;
+  if(swap == 1) swap=0;
+  else swap=1;
 }
 
 // #######################
