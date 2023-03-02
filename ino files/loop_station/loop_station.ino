@@ -11,12 +11,12 @@
 #define LEDREC 3 // pad key to start/stop recording
 #define RECBLINK 600 // blinking rate of the recording LED
 
-AudioPlayMemory    sound0;
-AudioPlayMemory    sound1;  // six memory players, so we can play
-AudioPlayMemory    sound2;  // all six sounds simultaneously
-AudioPlayMemory    sound3;
-AudioPlayMemory    sound4;
-AudioPlayMemory    sound5;
+AudioPlayMemory sound0;
+AudioPlayMemory sound1;  // six memory players, so we can play
+AudioPlayMemory sound2;  // all six sounds simultaneously
+AudioPlayMemory sound3;
+AudioPlayMemory sound4;
+AudioPlayMemory sound5;
 
 AudioPlaySdWav playWav;
 
@@ -97,7 +97,6 @@ void setup() {
   SPI.setMOSI(SDCARD_MOSI_PIN);
   SPI.setSCK(SDCARD_SCK_PIN);
   if (!(SD.begin(SDCARD_CS_PIN))) {
-    // stop here, but print a message repetitively
     while (1) {
       Serial.println("Unable to access the SD card");
       loadingAnimation();
