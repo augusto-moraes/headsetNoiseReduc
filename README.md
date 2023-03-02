@@ -27,7 +27,7 @@ the `SD` and `SPI` libraries to read our SD card, and finally the `Adafruit_Trel
 
 * The particular thing about our loop station is that it is able to record multiple tracks while you are playing it. In order to achieve this, we've created a 3 dimension array which memorises : the button played and the timing. The 3rd dimension allows simultaneous Writing and Reading : if I already have something recorded in a track A, I can playback it from the track A while recoding in a new track B. Once the recording is over, the track B becomes the new main (playback) track, and the track A becomes the next one to be recorded/replaced. This allows the user to record as many tracks layers as them likes. (checkout record and playRec functions)
 
-* Most of the functions (playAndRec, record and animations) uses millis() timing. Like this, teensy knows if it's time to play the next chord or turning on a LED without having to wait with a delay.
+* Most of the functions (playAndRec, record and animations) uses millis() timing. Like this, teensy knows if it's time to play the next chord or turning on a LED without having to wait with a delay. (based on Arduino Several Things at the Same Time) 
 
 * We have a `clearLoopMemory()` function whichs sets a flag saying that the recMem array is clear. We don't actually need to clean it as the next recording will crush it.
 
