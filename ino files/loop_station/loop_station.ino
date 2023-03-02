@@ -2,7 +2,6 @@
 #include <Wire.h>
 #include <SPI.h>
 #include <SD.h>
-#include <SerialFlash.h>
 #include "Adafruit_Trellis.h"
 
 #include "Preset1.h"
@@ -77,7 +76,7 @@ void setup() {
   Serial.begin(9600);
   Serial.println("Teensy LoopStation debug");
 
-  AudioMemory(60);
+  AudioMemory(20);
   sgtl5000_1.enable();
   sgtl5000_1.volume(0.7);
 
